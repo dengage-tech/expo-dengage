@@ -1,14 +1,13 @@
 {
   "name": "@dengage-tech/expo-dengage",
   "version": "1.0.0",
-  "description": "Expo config plugin for @dengage-tech/react-native-dengage (prebuild-native setup).",
+  "description": "Expo config plugin for native Dengage setup during expo prebuild (Android + iOS).",
   "main": "app.plugin.js",
   "types": "build/plugin/index.d.ts",
   "files": [
     "app.plugin.js",
     "build",
-    "README.md",
-    "INTEGRATION.md"
+    "README.md"
   ],
   "scripts": {
     "clean": "rm -rf build",
