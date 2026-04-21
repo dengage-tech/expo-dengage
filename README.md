@@ -216,24 +216,20 @@ Besides **`NativeModules.DengageRN`** methods, **`@dengage-tech/react-native-den
 **Requirements:**
 
 - Custom dev client or store build (not Expo Go).
-- **`setNavigationWithName(screenName)`** on the **same** logical screen name when that screen is visible, so the SDK can match navigation context to inline rules.
 
 **Props (TypeScript):**
 
 | Prop | Type | Meaning |
 |------|------|--------|
 | **`propertyId`** | `string` | Inline property identifier from Dengage. |
-| **`screenName`** | `string` | Screen key; must align with **`Dengage.setNavigationWithName`**. |
+| **`screenName`** | `string` | Screen identifier supplied to the native view (use the value expected for your Dengage inline configuration). |
 | **`customParams`** | `Record<string, string>` | Extra targeting key-values for the placement. |
 | **`style`** | optional `ViewStyle` | Layout / size; the view defaults to full width. |
 
 **Example:**
 
 ```tsx
-import Dengage, { InAppInlineView } from '@dengage-tech/react-native-dengage';
-
-// When this screen is active:
-Dengage.setNavigationWithName('home-inline');
+import { InAppInlineView } from '@dengage-tech/react-native-dengage';
 
 <InAppInlineView
   propertyId="YOUR_INLINE_PROPERTY_ID"
@@ -251,16 +247,14 @@ Dengage.setNavigationWithName('home-inline');
 | Prop | Type | Meaning |
 |------|------|--------|
 | **`storyPropertyId`** | `string \| null` | Story property id from Dengage. |
-| **`screenName`** | `string \| null` | Screen context for story resolution; keep consistent with **`setNavigationWithName`**. |
+| **`screenName`** | `string \| null` | Screen identifier supplied to the native story view (use the value expected for your Dengage App Story configuration). |
 | **`customParams`** | `Record<string, string> \| null` | Optional targeting map. |
 | **`style`** | optional `ViewStyle` | Defaults include a minimum height and background in the component wrapper. |
 
 **Example:**
 
 ```tsx
-import Dengage, { StoriesListView } from '@dengage-tech/react-native-dengage';
-
-Dengage.setNavigationWithName('appstory');
+import { StoriesListView } from '@dengage-tech/react-native-dengage';
 
 <StoriesListView
   storyPropertyId="YOUR_STORY_PROPERTY_ID"
@@ -327,7 +321,7 @@ Below, **“native”** means the call is forwarded to **`DengageRN`** → Andro
 |--------|----------------|
 | **`pageView(params: object)`** | Sends a **page view** / screen analytics event with arbitrary key-value **`params`** (e.g. `page_type`, `screen_name`). |
 | **`setNavigation()`** | Signals navigation stack reset / default navigation state to the SDK. |
-| **`setNavigationWithName(screenName: string)`** | Records the current logical screen name for in-app / targeting context. |
+| **`setNavigationWithName(screenName: string)`** | Passes a screen name string to the native SDK. |
 | **`onMessageReceived(params: object)`** | Forwards a received message object into the native pipeline (advanced / FCM callback integration patterns). |
 
 ### 7.5 Commerce and behavioral events (parameter objects)
@@ -439,7 +433,7 @@ A separate **sample Expo application** maintained alongside this plugin demonstr
 5. [ ] Enable **`androidGeofenceEnabled`** / **`iosGeofenceEnabled`** only if geofence is required; add iOS location usage strings and background modes as needed.
 6. [ ] Run **`npx expo prebuild --clean`**, then **`pod install`** under `ios/` if you manage CocoaPods manually.
 7. [ ] Produce dev or store builds with **`expo run:*`** or **EAS Build**; validate push, in-app, and analytics on real devices.
-8. [ ] Implement **`pageView`**, commerce events, inbox, **in-app inline** / **App Story** views (with matching **`setNavigationWithName`**), and listeners as required; test against staging before production keys.
+8. [ ] Implement **`pageView`**, commerce events, inbox, **in-app inline** / **App Story** views, and listeners as required; test against staging before production keys.
 
 ---
 
