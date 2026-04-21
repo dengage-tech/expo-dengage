@@ -2,7 +2,7 @@
 
 Expo **config plugin** that applies **native** Dengage wiring during **`expo prebuild`** (Android and iOS): Gradle and manifest changes, `Info.plist` keys, `AppDelegate` / `MainApplication` initialization snippets, optional geofence native modules, and related defaults.
 
-This **README** is the full integration guide for installing and configuring the package in an Expo app.
+This **README** is the full integration guide for installing and configuring the package in an Expo app, including how **`@dengage-tech/react-native-dengage`** (peer dependency) sits on top of that native layer and which JavaScript APIs you can call.
 
 ---
 
@@ -10,9 +10,9 @@ This **README** is the full integration guide for installing and configuring the
 
 | Responsibility | Owner |
 |----------------|--------|
-| Android: Gradle, Google Services plugin hook, `MainApplication` init snippet, manifest meta-data, FCM service registration, optional HMS pieces, optional geofence Gradle flag and dependency line, generated push receiver stub | **This plugin** |
+| Android: Gradle, Google Services plugin hook, `MainApplication` init snippet, manifest meta-data, FCM service registration, optional HMS pieces, optional geofence Gradle flag and dependency line, generated push receiver stub | **This plugin** (`@dengage-tech/expo-dengage`) |
 | iOS: `Info.plist` URL keys, `UIBackgroundModes` (`remote-notification`), `AppDelegate` init snippet, optional Podfile geofence flag | **This plugin** |
-| JavaScript APIs for campaigns, inbox, in-app messages, events, device identity, etc. | **Your application code** using the client libraries required by this package’s **`peerDependencies`** (see that file in the published package; install compatible versions alongside this plugin) |
+| JavaScript APIs for campaigns, inbox, in-app messages, events, device identity, geofence control, etc. | **`@dengage-tech/react-native-dengage`** — import in your app and call methods; it forwards to native code |
 
 **Expo Go** does not load custom native code from this plugin. Use a **development build** (`expo run:ios` / `expo run:android`), **EAS Build**, or equivalent custom client.
 
@@ -35,7 +35,7 @@ This **README** is the full integration guide for installing and configuring the
 Install this package in your Expo app root:
 
 ```bash
-npm install @dengage-tech/expo-dengage
+npm install @dengage-tech/expo-dengage @dengage-tech/react-native-dengage
 ```
 
 Install every **`peerDependency`** listed in `@dengage-tech/expo-dengage/package.json` at compatible versions (Expo, plus any other entries). Use the same package manager for the whole tree (`npm`, `yarn`, or `pnpm`) so resolutions stay consistent.
@@ -153,25 +153,212 @@ After native generation, open the **`.xcworkspace`** under `ios/` (not the bare 
 
 ---
 
-## 5. Application code (after native setup)
+## 5. Application code overview
 
-This plugin **does not** replace your product’s JavaScript layer. Once prebuild has produced native projects and you install the peer client libraries, you call Dengage capabilities from TypeScript or JavaScript **according to Dengage’s official application documentation** for your stack (screen analytics, push helpers, inbox, in-app, geofence start/stop, etc.).
+After **`expo prebuild`**, your app contains the **native** Dengage bootstrap code that this plugin generated (keys, URLs, FCM/HMS wiring, optional geofence binaries). None of that runs from JavaScript directly.
 
-For **notification open** and similar events, subscribe through whatever **native-event bridge** your application stack provides to the module name your client library documents for those callbacks.
+Your **React / Expo JavaScript** talks to Dengage through **`@dengage-tech/react-native-dengage`**: a thin layer that reads **`NativeModules.DengageRN`** and exposes typed methods. Each method maps to a **native module method** (`@ReactMethod` on Android, `RCT_EXTERN_METHOD` on iOS) implemented in the same package’s `android/` and `ios/` sources. Those implementations call the **official Dengage Android / iOS SDKs** (`Dengage.*` on Android, `Dengage` / `DengageGeofence` on iOS).
 
----
+So the chain is:
 
-## 6. Sample project layout
-
-A separate **sample Expo application** maintained alongside this plugin demonstrates a full `app.json` plugin block, navigation, analytics hooks, and optional screens (push, inbox, in-app, geofence). Use it as a structural reference for file layout and config shape; align API usage with current Dengage product docs.
+**Your JS** → **`import Dengage from '@dengage-tech/react-native-dengage'`** → **`NativeModules.DengageRN`** → **native bridge (`ReactNativeDengageModule` / `ReactNativeDengage`)** → **Dengage native SDK** → **network / device / push / geofence**.
 
 ---
 
-## 7. Troubleshooting
+## 6. How `expo-dengage` and `@dengage-tech/react-native-dengage` work together (under the hood)
+
+### 6.1 Build-time (Expo config plugin)
+
+When you run **`expo prebuild`**, `@dengage-tech/expo-dengage` runs as an Expo **config plugin**. It does not ship JavaScript to your bundle; it **rewrites or generates native project files**:
+
+| Platform | What the plugin does (summary) |
+|----------|--------------------------------|
+| **Android** | Adds Google Services classpath and `apply plugin`; injects **`DengageRNCoordinator.sharedInstance.setupDengage(...)`** into `MainApplication` after `ApplicationLifecycleDispatcher.onApplicationCreate(this)` with your Firebase key, optional HMS, `enableGeoFence`, logging, and development flags; merges manifest meta-data for API URLs; registers **FCM** (and optionally **HMS**) `service` entries; adds a **`DengageExpoPushReceiver`** Kotlin stub for Dengage push intents; sets **`INSTALL_DENGAGE_GEOFENCE`** and **`sdk-geofence`** dependency when geofence is enabled. |
+| **iOS** | Writes Dengage URL keys into **`Info.plist`**; ensures **`UIBackgroundModes`** includes **`remote-notification`**; injects **`DengageRNCoordinator.staticInstance.setupDengage(...)`** into **`AppDelegate.swift`** (integration key, App Group, `launchOptions`, notification permission flag, **`enableGeoFence`**, logging, development status); adds **`UNUserNotificationCenterDelegate`** handling and **APNs token** forwarding; optionally prepends **`ENV['install_dengage_geofence'] = '1'`** to the **Podfile** so **`pod install`** pulls the **DengageGeofence** pod. |
+
+That native bootstrap runs **once at app launch**, before React mounts. It initializes the underlying Dengage SDK with the same keys and options you declared in **`app.json`**.
+
+### 6.2 Run-time (React Native module)
+
+The **`@dengage-tech/react-native-dengage`** package registers a native module named **`DengageRN`**. The default export in `src/index.tsx` is that module (or a **Proxy** that throws a helpful error if the native side is missing — e.g. in **Expo Go**).
+
+On **module load**, the package may call **`registerNotificationListeners()`** once so that certain native → JS notification paths are wired without you having to call it (the method still exists for compatibility).
+
+### 6.3 Native SDK calls
+
+Inside the bridge:
+
+- **Android** — `ReactNativeDengageModule.kt` methods call **`com.dengage.sdk.Dengage`** (and, when present, geofence classes via reflection).
+- **iOS** — `ReactNativeDengage.swift` calls **`Dengage`** / **`DengageGeofence`** (when the geofence pod is linked).
+
+So **`expo-dengage`** ensures **init + manifest + Gradle/Pods** are correct; **`@dengage-tech/react-native-dengage`** ensures every **feature you invoke from JS** reaches those same native SDKs.
+
+### 6.4 Events from native to JavaScript (not the same as methods)
+
+Some behaviors are pushed **from native to JS** as **device events** (not return values of `Dengage.*` methods):
+
+| Event name | Typical source | How to listen in React Native |
+|------------|----------------|------------------------------|
+| **`onNotificationClicked`** | User taps a Dengage notification (Android receiver / iOS module) | `new NativeEventEmitter(NativeModules.DengageRN).addListener('onNotificationClicked', handler)` (iOS also declares this in **`supportedEvents`** on the native module). |
+| **`onNotificationReceived`** | Push received (Android **`NotifReciever`**) | Same pattern with **`NativeEventEmitter`** / **`DeviceEventEmitter`** depending on platform — use the event name your installed SDK version emits; payload is a serialized push **`Message`**. |
+| **`retrieveInAppLink`** | In-app link resolution (e.g. **`InAppLinkReceiver`** on Android, iOS **`supportedEvents`**) | Listen with **`NativeEventEmitter(NativeModules.DengageRN)`** for **`retrieveInAppLink`**. |
+
+Payload shapes match the native models (often JSON-like objects). Always guard listeners with cleanup on unmount.
+
+### 6.5 Optional UI exports
+
+The same npm package also exports **native view** components (e.g. **inline in-app** and **stories list**) for use in JSX. Those are separate from **`NativeModules.DengageRN`** and are documented in the package’s TypeScript exports (`InAppInlineView`, `StoriesListView`, etc.).
+
+---
+
+## 7. JavaScript API reference (`@dengage-tech/react-native-dengage`)
+
+Import the default export (typed as **`DengageType`**):
+
+```ts
+import Dengage from '@dengage-tech/react-native-dengage';
+```
+
+Below, **“native”** means the call is forwarded to **`DengageRN`** → Android/iOS bridge → **Dengage SDK**. Unless noted, methods are available on **both** platforms; some are **iOS-only** or **Android-only** as indicated.
+
+### 7.1 Push, tokens, and permissions
+
+| Method | What it does |
+|--------|----------------|
+| **`promptForPushNotifications()`** | Asks the user for notification permission (iOS path in native; Android uses activity-based permission request where applicable). |
+| **`promptForPushNotificationsWitCallback(callback)`** | Same intent as above with a **`(hasPermission: boolean) => void`** callback (**iOS**). |
+| **`registerForRemoteNotifications(enable: boolean)`** | Enables or disables registration for remote notifications (**iOS**). |
+| **`getUserPermission()`** | Returns a **promise of boolean** — whether the user has granted notification permission (reads from subscription / native state). |
+| **`setUserPermission(permission: boolean)`** | Sets user-level push permission flag in the SDK / subscription model. |
+| **`getToken()`** | Resolves to **string** — current push token from subscription (empty string if none). |
+| **`setToken(token: string)`** | Sets push token on the native side (advanced / testing scenarios). |
+| **`getSubscription()`** | Resolves to **Subscription** — device subscription snapshot (fields such as `sdkVersion`, `deviceId`, `contactKey`, `permission`, etc.). Primarily exercised on **Android**; on **iOS**, **`getContactKey()`** is often used for identity. |
+| **`resetAppBadge()`** | Clears the app icon badge count (**Android**). |
+| **`getLastPushPayload()`** | Resolves to **string** — last push payload serialized for debugging or deep-link handling. |
+
+### 7.2 Integration keys and logging (platform nuances)
+
+| Method | What it does |
+|--------|----------------|
+| **`setIntegrationKey(key: string)`** | Sets iOS integration key at runtime (**iOS**). Prefer configuring via **`expo-dengage`** so startup is consistent. |
+| **`getIntegrationKey()`** | Resolves to **string** — reads current iOS integration key (**iOS**). |
+| **`setFirebaseIntegrationKey(key: string)`** | **Android** — intended for compatibility; native init normally already set the key via **`setupDengage`**. May log a warning if the SDK is already initialized. |
+| **`setLogStatus(isVisible: boolean)`** | Toggles SDK log visibility on the native side. |
+| **`setDevelopmentStatus(isDebug: boolean)`** | Marks development vs production behavior for the native SDK (overrides / complements build-time flags where supported). |
+| **`getSdkParameters()`** | Resolves to **SdkParameters or null** — remote SDK configuration (e.g. feature flags such as geofence enabled server-side). |
+| **`getSdkVersion()`** | Resolves to **string** — native SDK version string. |
+
+### 7.3 Identity, device, and language
+
+| Method | What it does |
+|--------|----------------|
+| **`setContactKey(key: string \| null)`** | Associates the device with a **contact key** in Dengage (CRM / user id). Pass **`null`** to clear. |
+| **`getContactKey()`** | Resolves to **string or null** — current contact key (**iOS** returns from native; **Android** often reads from **`getSubscription()`** in practice). |
+| **`getDeviceId()`** | Resolves to **string** — Dengage device identifier. |
+| **`setDeviceId(deviceId: string)`** | Overrides device id on the native side (use only when your integration requires it). |
+| **`setLanguage(language: string)`** | Sets language attribute used in segmentation / messaging. |
+| **`setPartnerDeviceId(adid: string)`** | Sets partner / advertising id (e.g. ADID) for attribution-style use cases. |
+
+### 7.4 Screen and navigation tracking
+
+| Method | What it does |
+|--------|----------------|
+| **`pageView(params: object)`** | Sends a **page view** / screen analytics event with arbitrary key-value **`params`** (e.g. `page_type`, `screen_name`). |
+| **`setNavigation()`** | Signals navigation stack reset / default navigation state to the SDK. |
+| **`setNavigationWithName(screenName: string)`** | Records the current logical screen name for in-app / targeting context. |
+| **`onMessageReceived(params: object)`** | Forwards a received message object into the native pipeline (advanced / FCM callback integration patterns). |
+
+### 7.5 Commerce and behavioral events (parameter objects)
+
+Each of the following accepts a **`params`** object (shape depends on your Dengage schema). They map to native **event** APIs for e‑commerce and engagement:
+
+| Method | Typical use |
+|--------|-------------|
+| **`addToCart(params)`** | Add line to cart. |
+| **`removeFromCart(params)`** | Remove line from cart. |
+| **`viewCart(params)`** | Cart screen viewed. |
+| **`beginCheckout(params)`** | Checkout started. |
+| **`placeOrder(params)`** | Order completed. |
+| **`cancelOrder(params)`** | Order cancelled. |
+| **`addToWishList(params)`** / **`removeFromWishList(params)`** | Wishlist mutations. |
+| **`search(params)`** | Search performed. |
+
+### 7.6 Custom and device events
+
+| Method | What it does |
+|--------|----------------|
+| **`sendDeviceEvent(tableName: string, data: object)`** | Sends a row-style **device event** to the table **`tableName`** with **`data`** fields. |
+| **`sendCustomEvent(eventTable: string, key: string, parameters: object)`** | Sends a **custom event** keyed by **`key`** into **`eventTable`** with **`parameters`**. |
+
+### 7.7 In-app messaging
+
+| Method | What it does |
+|--------|----------------|
+| **`registerInAppListener()`** | Registers the app to receive in-app message lifecycle callbacks on the native side. |
+| **`setInAppLinkConfiguration(deeplink: string)`** | Base deeplink or scheme configuration used when in-app actions open URLs. |
+| **`setInAppDeviceInfo(key: string, value: string)`** | Adds a key-value pair to in-app targeting context. |
+| **`clearInAppDeviceInfo()`** | Clears all in-app device info pairs. |
+| **`getInAppDeviceInfo()`** | Resolves to **record of string to string** — reads current in-app device info map. |
+| **`setCategoryPath(path: string)`** | Current category path for retail targeting. |
+| **`setCartItemCount(count: string)`** / **`setCartAmount(amount: string)`** | Lightweight cart hints as strings for in-app rules. |
+| **`setState(state: string)`** / **`setCity(city: string)`** | Geographic / regional hints for targeting. |
+| **`showRealTimeInApp(screenName: string, params: Record<string, string>)`** | Triggers a **real-time in-app** fetch/display path for **`screenName`** with extra **`params`**. |
+
+### 7.8 Cart object (structured)
+
+| Method | What it does |
+|--------|----------------|
+| **`setCart(cart: Cart)`** | Resolves to **boolean** — uploads a full structured **`Cart`** (items, totals, currency) to the SDK for in-app / personalization. |
+| **`getCart()`** | Resolves to **Cart** — reads the cart currently held by the native SDK. |
+
+Types **`Cart`**, **`CartItem`**, etc. are exported from **`@dengage-tech/react-native-dengage`** (`./types`).
+
+### 7.9 Inbox
+
+| Method | What it does |
+|--------|----------------|
+| **`getInboxMessages(offset: number, limit: number)`** | Async — array of **`InboxMessage`** (paginated). |
+| **`deleteInboxMessage(id: string)`** | Async — **boolean** success for deleting one inbox message by id. |
+| **`setInboxMessageAsClicked(id: string)`** | Async — **boolean** success for marking a message as clicked. |
+| **`deleteAllInboxMessages()`** | Async — **boolean** success for clearing the inbox. |
+| **`setAllInboxMessageAsClicked()`** | Async — **boolean** success for marking all messages as clicked. |
+
+### 7.10 Geofence (requires native geofence enabled via this plugin)
+
+| Method | What it does |
+|--------|----------------|
+| **`requestLocationPermissions()`** | Starts the native flow to request location permissions (fine / background as configured on the OS). |
+| **`startGeofence()`** | Starts geofence tracking if native libraries are linked and server configuration allows it. |
+| **`stopGeofence()`** | Stops geofence tracking. |
+
+If **`androidGeofenceEnabled`** / **`iosGeofenceEnabled`** are **`false`**, these calls may no-op or log warnings because the geofence native code is not linked.
+
+### 7.11 Notification action callback (iOS)
+
+| Method | What it does |
+|--------|----------------|
+| **`handleNotificationActionBlock(callback)`** | Registers a callback invoked with a **`NotificationAction`** shape when the user interacts with a notification (**iOS**). Use together with native notification delegate wiring from **`expo-dengage`**. |
+
+### 7.12 Deprecated / internal
+
+| Method | Notes |
+|--------|--------|
+| **`registerNotificationListeners()`** | Marked deprecated in types; the package may invoke it internally on load. **You normally do not call this** unless directed by Dengage support. |
+
+---
+
+## 8. Sample project layout
+
+A separate **sample Expo application** maintained alongside this plugin demonstrates a full `app.json` plugin block, navigation, **`pageView`**, **`NativeEventEmitter`** listeners, and optional screens (push, inbox, in-app, geofence). Use it as a structural reference; cross-check parameter shapes with your Dengage project documentation.
+
+---
+
+## 9. Troubleshooting
 
 | Symptom | What to verify |
 |---------|----------------|
 | Missing native module / crash inside Expo Go | Use a **custom dev build** or EAS build — not Expo Go. |
+| **`The package '@dengage-tech/react-native-dengage' doesn't seem to be linked`** | Run **`pod install`**, rebuild after **`expo prebuild`**, and ensure you are not on Expo Go. |
 | Android FCM not delivering | `google-services.json` path, `expo.android.package` vs Firebase package, release SHA keys if applicable. |
 | iOS push not registering | Capabilities, provisioning profiles, App Group, correct integration key, physical device for final push tests. |
 | Plugin edits not visible | Run **`npx expo prebuild --clean`**, reinstall pods on iOS, clean Gradle on Android, rebuild. |
@@ -179,24 +366,24 @@ A separate **sample Expo application** maintained alongside this plugin demonstr
 
 ---
 
-## 8. Release checklist (Expo + Dengage)
+## 10. Release checklist (Expo + Dengage)
 
-1. [ ] Install `@dengage-tech/expo-dengage` and all **`peerDependencies`** at supported versions.
+1. [ ] Install **`@dengage-tech/expo-dengage`** and **`@dengage-tech/react-native-dengage`** (and other **`peerDependencies`**) at supported versions.
 2. [ ] Add the plugin block with **Android Firebase** and **iOS** integration keys and **`iosAppGroup`**.
 3. [ ] Configure **`expo.android.googleServicesFile`** and matching **`expo.android.package`**.
 4. [ ] Set optional URL overrides from Dengage for your environment.
 5. [ ] Enable **`androidGeofenceEnabled`** / **`iosGeofenceEnabled`** only if geofence is required; add iOS location usage strings and background modes as needed.
 6. [ ] Run **`npx expo prebuild --clean`**, then **`pod install`** under `ios/` if you manage CocoaPods manually.
 7. [ ] Produce dev or store builds with **`expo run:*`** or **EAS Build**; validate push, in-app, and analytics on real devices.
-8. [ ] Wire application-level APIs from Dengage’s current documentation and test against staging before production keys.
+8. [ ] Implement **`pageView`**, commerce events, inbox, and listeners as required; test against staging before production keys.
 
 ---
 
-## 9. Support
+## 11. Support
 
-For **plugin-specific** behavior (what gets written to Gradle, Podfile, `Info.plist`, or manifests), inspect the TypeScript sources under **`src/plugin/`** in this repository or open an issue with the **Expo SDK version**, **plugin version**, and a redacted `app.json` plugin block.
+For **config-plugin** behavior (Gradle, Podfile, `Info.plist`, manifests), inspect **`src/plugin/`** in **`@dengage-tech/expo-dengage`** or open an issue with **Expo SDK version**, **plugin version**, and a redacted **`app.json`** plugin block.
 
-For **account keys, endpoints, console features, and campaign behavior**, contact **Dengage** support or your integration manager.
+For **JavaScript API** semantics, payload schemas, and campaign rules, use **Dengage** product documentation and your integration manager.
 
 ---
 
