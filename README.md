@@ -97,7 +97,7 @@ If you omit these, the plugin sets **default** Dengage API base URLs on iOS (`In
 | `dengageEventApiUrl` | Event ingestion |
 | `dengagePushApiUrl` | Push (iOS key `DengageApiUrl`) |
 | `dengageDeviceIdApiUrl` | Device / identifier endpoints |
-| `dengageInAppApiUrl` | In-app messaging |
+| `dengageInAppApiUrl` | In-app messaging (fullscreen, **real-time in-app**, and feeds used by **in-app inline** and **App Story** native views) |
 | `dengageGeofenceApiUrl` | Geofence backend |
 | `fetchRealTimeInAppApiUrl` | Real-time in-app |
 
@@ -205,9 +205,71 @@ Some behaviors are pushed **from native to JS** as **device events** (not return
 
 Payload shapes match the native models (often JSON-like objects). Always guard listeners with cleanup on unmount.
 
-### 6.5 Optional UI exports
+### 6.5 In-app inline and App Story (native UI components)
 
-The same npm package also exports **native view** components (e.g. **inline in-app** and **stories list**) for use in JSX. Those are separate from **`NativeModules.DengageRN`** and are documented in the package’s TypeScript exports (`InAppInlineView`, `StoriesListView`, etc.).
+Besides **`NativeModules.DengageRN`** methods, **`@dengage-tech/react-native-dengage`** registers **native view managers** you embed in JSX. They use the **same** native bootstrap and **`dengageInAppApiUrl`** (and related in-app setup) that **`expo-dengage`** applies at prebuild—there are **no extra Expo plugin keys** only for inline or App Story.
+
+#### In-app inline (`InAppInlineView`)
+
+**Purpose:** show a **Dengage inline placement** (banner / slot) at a fixed position in your layout, configured in the Dengage panel with a **property id**.
+
+**Requirements:**
+
+- Custom dev client or store build (not Expo Go).
+- **`setNavigationWithName(screenName)`** on the **same** logical screen name when that screen is visible, so the SDK can match navigation context to inline rules.
+
+**Props (TypeScript):**
+
+| Prop | Type | Meaning |
+|------|------|--------|
+| **`propertyId`** | `string` | Inline property identifier from Dengage. |
+| **`screenName`** | `string` | Screen key; must align with **`Dengage.setNavigationWithName`**. |
+| **`customParams`** | `Record<string, string>` | Extra targeting key-values for the placement. |
+| **`style`** | optional `ViewStyle` | Layout / size; the view defaults to full width. |
+
+**Example:**
+
+```tsx
+import Dengage, { InAppInlineView } from '@dengage-tech/react-native-dengage';
+
+// When this screen is active:
+Dengage.setNavigationWithName('home-inline');
+
+<InAppInlineView
+  propertyId="YOUR_INLINE_PROPERTY_ID"
+  screenName="home-inline"
+  customParams={{ segment: 'vip' }}
+/>
+```
+
+#### App Story (`StoriesListView`)
+
+**Purpose:** render the **App Story** / stories strip UI driven by the native Dengage SDK (story property configured in the console).
+
+**Props:**
+
+| Prop | Type | Meaning |
+|------|------|--------|
+| **`storyPropertyId`** | `string \| null` | Story property id from Dengage. |
+| **`screenName`** | `string \| null` | Screen context for story resolution; keep consistent with **`setNavigationWithName`**. |
+| **`customParams`** | `Record<string, string> \| null` | Optional targeting map. |
+| **`style`** | optional `ViewStyle` | Defaults include a minimum height and background in the component wrapper. |
+
+**Example:**
+
+```tsx
+import Dengage, { StoriesListView } from '@dengage-tech/react-native-dengage';
+
+Dengage.setNavigationWithName('appstory');
+
+<StoriesListView
+  storyPropertyId="YOUR_STORY_PROPERTY_ID"
+  screenName="appstory"
+  customParams={{}}
+/>
+```
+
+**Operational notes:** configure creatives and property ids in **Dengage**; wrong or missing **`propertyId` / `storyPropertyId`** results in an empty native view. Test on **real devices** after **`expo prebuild`** and a full native rebuild.
 
 ---
 
@@ -292,6 +354,8 @@ Each of the following accepts a **`params`** object (shape depends on your Denga
 
 ### 7.7 In-app messaging
 
+For **embedded** placements (**in-app inline**) and the **App Story** strip, use the native views described in **section 6.5** in addition to the methods below.
+
 | Method | What it does |
 |--------|----------------|
 | **`registerInAppListener()`** | Registers the app to receive in-app message lifecycle callbacks on the native side. |
@@ -349,7 +413,7 @@ If **`androidGeofenceEnabled`** / **`iosGeofenceEnabled`** are **`false`**, thes
 
 ## 8. Sample project layout
 
-A separate **sample Expo application** maintained alongside this plugin demonstrates a full `app.json` plugin block, navigation, **`pageView`**, **`NativeEventEmitter`** listeners, and optional screens (push, inbox, in-app, geofence). Use it as a structural reference; cross-check parameter shapes with your Dengage project documentation.
+A separate **sample Expo application** maintained alongside this plugin demonstrates a full `app.json` plugin block, navigation, **`pageView`**, **`NativeEventEmitter`** listeners, and optional screens including **push**, **inbox**, **in-app message**, **in-app inline** (`InAppInlineView`), **App Story** (`StoriesListView`), and **geofence**. Use it as a structural reference; cross-check property ids and parameter shapes with your Dengage project documentation.
 
 ---
 
@@ -375,7 +439,7 @@ A separate **sample Expo application** maintained alongside this plugin demonstr
 5. [ ] Enable **`androidGeofenceEnabled`** / **`iosGeofenceEnabled`** only if geofence is required; add iOS location usage strings and background modes as needed.
 6. [ ] Run **`npx expo prebuild --clean`**, then **`pod install`** under `ios/` if you manage CocoaPods manually.
 7. [ ] Produce dev or store builds with **`expo run:*`** or **EAS Build**; validate push, in-app, and analytics on real devices.
-8. [ ] Implement **`pageView`**, commerce events, inbox, and listeners as required; test against staging before production keys.
+8. [ ] Implement **`pageView`**, commerce events, inbox, **in-app inline** / **App Story** views (with matching **`setNavigationWithName`**), and listeners as required; test against staging before production keys.
 
 ---
 
