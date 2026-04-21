@@ -1,0 +1,35 @@
+{
+  "name": "@dengage-tech/expo-dengage",
+  "version": "1.0.0",
+  "description": "Expo config plugin for @dengage-tech/react-native-dengage (prebuild-native setup).",
+  "main": "app.plugin.js",
+  "types": "build/plugin/index.d.ts",
+  "files": [
+    "app.plugin.js",
+    "build",
+    "README.md",
+    "INTEGRATION.md"
+  ],
+  "scripts": {
+    "clean": "rm -rf build",
+    "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "expo",
+    "dengage",
+    "config-plugin",
+    "react-native"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@expo/config-plugins": "~54.0.4"
+  },
+  "peerDependencies": {
+    "expo": ">=49.0.0",
+    "@dengage-tech/react-native-dengage": ">=2.0.0"
+  },
+  "devDependencies": {
+    "typescript": "~5.6.3"
+  }
+}
