@@ -1,6 +1,6 @@
 {
   "name": "@dengage-tech/expo-dengage",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Expo config plugin for native Dengage setup during expo prebuild (Android + iOS).",
   "main": "app.plugin.js",
   "types": "build/plugin/index.d.ts",

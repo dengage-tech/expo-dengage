@@ -1,5 +1,12 @@
-import { ConfigPlugin, withDangerousMod, withInfoPlist } from '@expo/config-plugins';
+import {
+  ConfigPlugin,
+  withDangerousMod,
+  withEntitlementsPlist,
+  withInfoPlist,
+} from '@expo/config-plugins';
 import type { DengageExpoPluginProps } from './types';
+
+const IOS_APP_GROUPS_ENTITLEMENT = 'com.apple.security.application-groups';
 
 const SWIFT_BEGIN = '    // @generated begin @dengage-tech/expo-dengage';
 const SWIFT_END = '    // @generated end @dengage-tech/expo-dengage';
@@ -30,6 +37,30 @@ const withDengageInfoPlist: ConfigPlugin<DengageExpoPluginProps> = (config, prop
       c.modResults.UIBackgroundModes.push('remote-notification');
     }
 
+    return c;
+  });
+};
+
+/** Merges App Group id into signed entitlements (required by iOS for shared group containers). */
+const withDengageAppGroupEntitlements: ConfigPlugin<DengageExpoPluginProps> = (config, props) => {
+  return withEntitlementsPlist(config, (c) => {
+    const groupId = props.iosAppGroup?.trim();
+    if (!groupId) {
+      return c;
+    }
+    const existing = c.modResults[IOS_APP_GROUPS_ENTITLEMENT];
+    const merged = new Set<string>();
+    if (Array.isArray(existing)) {
+      for (const entry of existing) {
+        if (typeof entry === 'string' && entry.trim()) {
+          merged.add(entry.trim());
+        }
+      }
+    } else if (typeof existing === 'string' && existing.trim()) {
+      merged.add(existing.trim());
+    }
+    merged.add(groupId);
+    c.modResults[IOS_APP_GROUPS_ENTITLEMENT] = Array.from(merged);
     return c;
   });
 };
@@ -192,6 +223,7 @@ ${EXT_END}
 
 export const withDengageIos: ConfigPlugin<DengageExpoPluginProps> = (config, props) => {
   config = withDengageInfoPlist(config, props);
+  config = withDengageAppGroupEntitlements(config, props);
   config = withDengageIosGeofencePodEnv(config, props);
   config = withDengageAppDelegate(config, props);
   return config;

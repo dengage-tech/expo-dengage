@@ -281,7 +281,6 @@ const withDengageMainApplication: ConfigPlugin<DengageExpoPluginProps> = (config
   const devFromBuild = props.androidDevelopmentStatusFromBuild !== false;
 
   const bodyBlock = `${BEGIN}
-    DengageRNCoordinator.sharedInstance.injectReactInstanceManager(reactNativeHost.reactInstanceManager)
     DengageRNCoordinator.sharedInstance.setupDengage(
       firebaseIntegrationKey = ${JSON.stringify(props.androidFirebaseIntegrationKey)},
       huaweiIntegrationKey = ${hms ? JSON.stringify(props.androidHuaweiIntegrationKey ?? '') : 'null'},

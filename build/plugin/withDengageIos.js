@@ -25,6 +25,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.withDengageIos = void 0;
 const config_plugins_1 = require("@expo/config-plugins");
+const IOS_APP_GROUPS_ENTITLEMENT = 'com.apple.security.application-groups';
 const SWIFT_BEGIN = '    // @generated begin @dengage-tech/expo-dengage';
 const SWIFT_END = '    // @generated end @dengage-tech/expo-dengage';
 const EXT_BEGIN = '// @generated begin @dengage-tech/expo-dengage-extension';
@@ -50,6 +51,31 @@ const withDengageInfoPlist = (config, props) => {
         if (!c.modResults.UIBackgroundModes.includes('remote-notification')) {
             c.modResults.UIBackgroundModes.push('remote-notification');
         }
+        return c;
+    });
+};
+/** Merges App Group id into signed entitlements (required by iOS for shared group containers). */
+const withDengageAppGroupEntitlements = (config, props) => {
+    return (0, config_plugins_1.withEntitlementsPlist)(config, (c) => {
+        var _a;
+        const groupId = (_a = props.iosAppGroup) === null || _a === void 0 ? void 0 : _a.trim();
+        if (!groupId) {
+            return c;
+        }
+        const existing = c.modResults[IOS_APP_GROUPS_ENTITLEMENT];
+        const merged = new Set();
+        if (Array.isArray(existing)) {
+            for (const entry of existing) {
+                if (typeof entry === 'string' && entry.trim()) {
+                    merged.add(entry.trim());
+                }
+            }
+        }
+        else if (typeof existing === 'string' && existing.trim()) {
+            merged.add(existing.trim());
+        }
+        merged.add(groupId);
+        c.modResults[IOS_APP_GROUPS_ENTITLEMENT] = Array.from(merged);
         return c;
     });
 };
@@ -186,6 +212,7 @@ ${EXT_END}
 };
 const withDengageIos = (config, props) => {
     config = withDengageInfoPlist(config, props);
+    config = withDengageAppGroupEntitlements(config, props);
     config = withDengageIosGeofencePodEnv(config, props);
     config = withDengageAppDelegate(config, props);
     return config;
